@@ -89,6 +89,35 @@ def instalar_playwright():
 instalar_playwright()
 
 
+# ================= FUNÇÕES DE MÁSCARA ESTILO BANCO =================
+def formatar_cpf_mascara():
+    """Aplica máscara 111.111.111-11 automaticamente ao digitar no campo CPF."""
+    digitos = re.sub(r"\D", "", st.session_state.get("cpf_input", ""))[:11]
+    if len(digitos) <= 3:
+        formatado = digitos
+    elif len(digitos) <= 6:
+        formatado = f"{digitos[:3]}.{digitos[3:]}"
+    elif len(digitos) <= 9:
+        formatado = f"{digitos[:3]}.{digitos[3:6]}.{digitos[6:]}"
+    else:
+        formatado = f"{digitos[:3]}.{digitos[3:6]}.{digitos[6:9]}-{digitos[9:]}"
+    st.session_state["cpf_input"] = formatado
+
+
+def formatar_moeda_banco_mascara():
+    """Formata o valor estilo aplicativo bancário (centavos da direita para a esquerda: R$ 1.234,56)."""
+    digitos = re.sub(r"\D", "", st.session_state.get("adiantamento_input", ""))
+    centavos = int(digitos) if digitos else 0
+    valor_float = centavos / 100.0
+    texto_br = f"{valor_float:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    st.session_state["adiantamento_input"] = f"R$ {texto_br}"
+
+
+def converter_moeda_para_float(texto_moeda: str) -> float:
+    digitos = re.sub(r"\D", "", texto_moeda or "")
+    return (int(digitos) / 100.0) if digitos else 0.0
+
+
 # ================= TELA DE ACESSO =================
 def verificar_acesso():
     senha_correta = st.secrets.get("SENHA_ACESSO", "ecobrasil2026")
@@ -111,6 +140,13 @@ if not verificar_acesso():
     st.stop()
 
 
+# Inicializa estados das máscaras se ainda não existirem
+if "cpf_input" not in st.session_state:
+    st.session_state["cpf_input"] = ""
+if "adiantamento_input" not in st.session_state:
+    st.session_state["adiantamento_input"] = "R$ 0,00"
+
+
 # ================= INTERFACE PRINCIPAL =================
 st.title("🧾 Prestação de Contas & Reembolso (NFC-e)")
 st.markdown(
@@ -129,14 +165,26 @@ col_sol1, col_sol2 = st.columns([2, 1])
 with col_sol1:
     nome_solicitante = st.text_input("Nome do Solicitante *", placeholder="Ex: João da Silva")
 with col_sol2:
-    cpf_solicitante = st.text_input("CPF *", placeholder="000.000.000-00", max_chars=14)
+    cpf_solicitante = st.text_input(
+        "CPF * (digite apenas números)",
+        key="cpf_input",
+        on_change=formatar_cpf_mascara,
+        placeholder="111.111.111-11",
+        max_chars=14,
+    )
 
 col_resp1, col_resp2 = st.columns([2, 1])
 with col_resp1:
     responsavel_area = st.text_input("Responsável da Área *", placeholder="Nome do gestor responsável")
 with col_resp2:
     if tipo_relatorio == "Relatório de Prestação de Contas":
-        valor_adiantamento = st.number_input("Valor do Adiantamento (R$)", min_value=0.0, step=10.0, format="%.2f")
+        adiantamento_texto = st.text_input(
+            "Valor do Adiantamento (digite só números)",
+            key="adiantamento_input",
+            on_change=formatar_moeda_banco_mascara,
+            help="Preenchimento estilo banco: digite apenas os números (ex: 15000 vira R$ 150,00).",
+        )
+        valor_adiantamento = converter_moeda_para_float(adiantamento_texto)
         data_adiantamento = st.date_input("Data do Adiantamento", value=date.today(), format="DD/MM/YYYY")
     else:
         valor_adiantamento = 0.0
@@ -183,7 +231,7 @@ else:
             placeholder="Titular da conta bancária",
         )
 
-# 3. CLASSIFICAÇÃO CONTÁBIL (SELEÇÃO COM AS LISTAS OFICIAIS DA PLANILHA)
+# 3. CLASSIFICAÇÃO CONTÁBIL
 with st.expander("⚙️ Classe de Valor e Centro de Custo (Padrão TI — clique para alterar)", expanded=False):
     col_cc1, col_cc2 = st.columns(2)
     with col_cc1:
@@ -363,26 +411,23 @@ def gerar_planilha_final(
     ws = wb["RELATÓRIO DE CONTAS"]
 
     # 1. Tipo de Relatório via tabela auxiliar (V3: 1 = Reembolso | 2 = Prestação de Contas)
-    # A célula B2 possui a fórmula =INDEX($U$4:$V$5,MATCH($V$3,$U$4:$U$5,0),2) que atualiza o título automaticamente
-    if cabecalho["tipo_relatorio"] == "Relatório de Reembolso":
-        ws["V3"] = 1
-    else:
-        ws["V3"] = 2
+    ws["V3"] = 1 if cabecalho["tipo_relatorio"] == "Relatório de Reembolso" else 2
 
     # 2. Data de Emissão (J10)
     ws["J10"] = datetime.combine(date.today(), datetime.min.time())
     ws["J10"].number_format = "DD/MM/YYYY"
 
-    # 3. Nome do Solicitante (B14:H14), CPF (I14:J14) e Responsável da Área (B17:J17)
+    # 3. Nome do Solicitante (B14:H14), CPF formatado com pontos e traço (I14:J14) e Responsável (B17:J17)
     ws["B14"] = cabecalho["nome_solicitante"].strip().upper()
     aplicar_alinhamento_sem_vazar(ws["B14"], horizontal="left", wrap=True)
 
     cpf_digitos = re.sub(r"\D", "", cabecalho["cpf"])
     if len(cpf_digitos) == 11:
-        ws["I14"] = int(cpf_digitos)
-        ws["I14"].number_format = '000"."000"."000"-"00'
+        cpf_formatado = f"{cpf_digitos[:3]}.{cpf_digitos[3:6]}.{cpf_digitos[6:9]}-{cpf_digitos[9:]}"
     else:
-        ws["I14"] = cabecalho["cpf"].strip()
+        cpf_formatado = cabecalho["cpf"].strip()
+    ws["I14"] = cpf_formatado
+    ws["I14"].number_format = "@"
     aplicar_alinhamento_sem_vazar(ws["I14"], horizontal="center", wrap=False, shrink=True)
 
     ws["B17"] = cabecalho["responsavel_area"].strip().upper()
@@ -391,6 +436,7 @@ def gerar_planilha_final(
     # 4. Adiantamento (D19 e J20) quando for Prestação de Contas
     if cabecalho["tipo_relatorio"] == "Relatório de Prestação de Contas":
         ws["D19"] = float(cabecalho["valor_adiantamento"])
+        ws["D19"].number_format = '_-"R$"\\ * #,##0.00_-;\\-"R$"\\ * #,##0.00_-;_-"R$"\\ * "-"??_-;_-@_-'
         if cabecalho["data_adiantamento"]:
             ws["J20"] = datetime.combine(cabecalho["data_adiantamento"], datetime.min.time())
             ws["J20"].number_format = "DD/MM/YYYY"
@@ -412,7 +458,6 @@ def gerar_planilha_final(
         ws["H24"] = bancario["responsavel_conta"].strip().upper()
         aplicar_alinhamento_sem_vazar(ws["H24"], horizontal="left", wrap=True)
 
-        # Limpa campos da transferência bancária
         for col_limpar in ["E27", "F27", "G27", "H27"]:
             ws[col_limpar] = None
     else:
@@ -431,7 +476,6 @@ def gerar_planilha_final(
         ws["H27"] = bancario["responsavel_conta"].strip().upper()
         aplicar_alinhamento_sem_vazar(ws["H27"], horizontal="left", wrap=True)
 
-        # Limpa campos do PIX
         for col_limpar in ["E24", "F24", "H24"]:
             ws[col_limpar] = None
 
@@ -476,7 +520,6 @@ def gerar_planilha_final(
         ws[f"J{linha_destino}"] = dados["valor_total"]
         aplicar_alinhamento_sem_vazar(ws[f"J{linha_destino}"], horizontal="right", wrap=False)
 
-        # Ajusta a altura da linha proporcionalmente ao texto para nunca cortar nem vazar
         linhas_obs = math.ceil(len(observacao) / 36) if observacao else 1
         linhas_cc = math.ceil(len(centro_cus) / 24) if centro_cus else 1
         qtd_linhas_texto = max(linhas_obs, linhas_cc, 1)
@@ -518,8 +561,9 @@ def validar_campos_obrigatorios() -> list[str]:
     faltando = []
     if not nome_solicitante.strip():
         faltando.append("Nome do Solicitante")
-    if not cpf_solicitante.strip():
-        faltando.append("CPF")
+    cpf_limpo = re.sub(r"\D", "", cpf_solicitante)
+    if len(cpf_limpo) != 11:
+        faltando.append("CPF válido (11 dígitos)")
     if not responsavel_area.strip():
         faltando.append("Responsável da Área")
     if forma_pagamento == "PAGAMENTO VIA PIX":
@@ -543,7 +587,7 @@ if planilha_bytes and arquivos_fotos:
     if st.button("🚀 Processar Notas Fiscais", type="primary", use_container_width=True):
         campos_faltantes = validar_campos_obrigatorios()
         if campos_faltantes:
-            st.warning(f"Preencha os campos obrigatórios antes de continuar: **{', '.join(campos_faltantes)}**.")
+            st.warning(f"Preencha corretamente antes de continuar: **{', '.join(campos_faltantes)}**.")
         else:
             with st.status("Lendo QR Codes e consultando a SEFAZ-SP...", expanded=True) as status:
                 urls_para_consultar = []

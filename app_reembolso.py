@@ -1,4 +1,3 @@
-import base64
 import copy
 import io
 import math
@@ -13,56 +12,14 @@ from openpyxl.styles import Alignment
 import streamlit as st
 from playwright.sync_api import sync_playwright
 
-CAMINHO_LOGO = "logo.png"
-CAMINHO_MODELO_PADRAO = "modelo.xlsx"
-
 # ================= CONFIGURAÇÃO DA PÁGINA =================
 st.set_page_config(
     page_title="Prestação de Contas & Reembolso | Eco Brasil",
-    page_icon=CAMINHO_LOGO if os.path.exists(CAMINHO_LOGO) else "🧾",
+    page_icon="🧾",
     layout="centered",
 )
 
-
-@st.cache_data
-def carregar_logo_base64(caminho: str) -> str:
-    """Converte a logo para base64 para exibição inline alinhada com os títulos."""
-    if not os.path.exists(caminho):
-        return ""
-    with open(caminho, "rb") as f:
-        return base64.b64encode(f.read()).decode("utf-8")
-
-
-LOGO_B64 = carregar_logo_base64(CAMINHO_LOGO)
-
-
-def titulo_com_logo(texto: str, nivel: int = 1):
-    """Exibe a logo da Eco Brasil ao lado dos títulos principais."""
-    if not LOGO_B64:
-        if nivel == 1:
-            st.title(texto)
-        else:
-            st.subheader(texto)
-        return
-
-    tamanho_img = 54 if nivel == 1 else 36
-    tamanho_fonte = "2.0rem" if nivel == 1 else "1.35rem"
-    margem_topo = "0.2rem" if nivel == 1 else "1.4rem"
-
-    st.markdown(
-        f"""
-        <div style="display: flex; align-items: center; gap: 14px; margin-top: {margem_topo}; margin-bottom: 0.6rem;">
-            <div style="background-color: #132219; padding: 6px 8px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
-                <img src="data:image/png;base64,{LOGO_B64}" style="height: {tamanho_img}px; width: auto; display: block;" />
-            </div>
-            <div style="font-size: {tamanho_fonte}; font-weight: 700; line-height: 1.2;">
-                {texto}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
+CAMINHO_MODELO_PADRAO = "modelo.xlsx"
 
 CLASSES_VALOR_OFICIAIS = [
     "105001 - GESTÃO CORPORATIVA",
@@ -161,6 +118,7 @@ def converter_moeda_para_float(texto_moeda: str) -> float:
     return (int(digitos) / 100.0) if digitos else 0.0
 
 
+# Inicializa estados das máscaras se ainda não existirem
 if "cpf_input" not in st.session_state:
     st.session_state["cpf_input"] = ""
 if "adiantamento_input" not in st.session_state:
@@ -168,13 +126,13 @@ if "adiantamento_input" not in st.session_state:
 
 
 # ================= INTERFACE PRINCIPAL =================
-titulo_com_logo("Prestação de Contas & Reembolso (NFC-e)", nivel=1)
+st.title("🧾 Prestação de Contas & Reembolso (NFC-e)")
 st.markdown(
     "Preencha os dados do relatório, envie as fotos dos cupons fiscais e baixe a planilha oficial pronta."
 )
 
 # 1. TIPO DE RELATÓRIO E DADOS DO SOLICITANTE
-titulo_com_logo("1️⃣ Identificação e Tipo de Relatório", nivel=2)
+st.subheader("1️⃣ Identificação e Tipo de Relatório")
 tipo_relatorio = st.radio(
     "Selecione o Tipo de Relatório:",
     options=["Relatório de Prestação de Contas", "Relatório de Reembolso"],
@@ -212,7 +170,7 @@ with col_resp2:
         st.caption("ℹ️ No Relatório de Reembolso não há valor de adiantamento.")
 
 # 2. DADOS BANCÁRIOS (PIX OU TRANSFERÊNCIA)
-titulo_com_logo("2️⃣ Dados Bancários para Pagamento", nivel=2)
+st.subheader("2️⃣ Dados Bancários para Pagamento")
 forma_pagamento = st.radio(
     "Forma de Pagamento:",
     options=["PAGAMENTO VIA PIX", "TRANSFERÊNCIA BANCÁRIA"],
@@ -551,7 +509,7 @@ def gerar_planilha_final(
 
 
 # ================= UPLOAD E EXECUÇÃO =================
-titulo_com_logo("3️⃣ Notas Fiscais (QR Code)", nivel=2)
+st.subheader("3️⃣ Notas Fiscais (QR Code)")
 
 planilha_bytes = None
 nome_arquivo_saida = f"{tipo_relatorio.replace(' ', '_')}.xlsx"

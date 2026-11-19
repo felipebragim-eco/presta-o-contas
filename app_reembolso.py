@@ -95,7 +95,7 @@ def verificar_acesso():
         return True
 
     st.title("Acesso Restrito — Eco Brasil Bioenergia")
-    st.markdown("Informe a senha corporativa para acessar o portal de prestação de contas e reembolso.")
+    st.markdown("Informe a senha padrão corporativa para acessar o portal de prestação de contas e reembolso.")
     with st.form("form_login"):
         senha_digitada = st.text_input("Senha de acesso", type="password")
         entrar = st.form_submit_button("Acessar Sistema", type="primary")
@@ -154,7 +154,7 @@ st.markdown(
 )
 
 # 1. IDENTIFICAÇÃO E TIPO DE RELATÓRIO
-st.subheader("1. Identificação e Natureza do Relatório")
+st.subheader("Identificação e Natureza do Relatório")
 tipo_relatorio = st.radio(
     "Tipo de Relatório:",
     options=["Relatório de Prestação de Contas", "Relatório de Reembolso"],
@@ -192,7 +192,7 @@ with col_resp2:
         st.caption("Observação: O Relatório de Reembolso não possui lançamento de adiantamento.")
 
 # 2. DADOS BANCÁRIOS
-st.subheader("2. Dados Bancários para Crédito")
+st.subheader("Dados Bancários para Crédito")
 forma_pagamento = st.radio(
     "Modalidade de Pagamento:",
     options=["PAGAMENTO VIA PIX", "TRANSFERÊNCIA BANCÁRIA"],
@@ -531,7 +531,7 @@ def gerar_planilha_final(
 
 
 # ================= UPLOAD E EXECUÇÃO =================
-st.subheader("3. Comprovantes Fiscais (QR Code)")
+st.subheader("Comprovantes Fiscais (QR Code)")
 
 planilha_bytes = None
 nome_arquivo_saida = f"{tipo_relatorio.replace(' ', '_')}.xlsx"

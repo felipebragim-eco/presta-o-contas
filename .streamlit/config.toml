@@ -3,13 +3,13 @@
 primaryColor = "#0fcc2f"
 
 # Cor de fundo da área principal
-backgroundColor = "#F7F9F8"
+backgroundColor = "#292929"
 
 # Cor de fundo dos campos de texto, uploaders e caixas expansíveis
 secondaryBackgroundColor = "#E6EFEA"
 
 # Cor principal dos textos
-textColor = "#16241C"
+textColor = "#ffffff"
 
 # Fonte do aplicativo ("sans serif", "serif" ou "monospace")
 font = "sans serif"

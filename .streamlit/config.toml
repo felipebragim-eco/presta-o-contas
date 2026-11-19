@@ -6,7 +6,7 @@ primaryColor = "#0fcc2f"
 backgroundColor = "#292929"
 
 # Cor de fundo dos campos de texto, uploaders e caixas expansíveis
-secondaryBackgroundColor = "#E6EFEA"
+secondaryBackgroundColor = "#5e5e5e"
 
 # Cor principal dos textos
 textColor = "#ffffff"

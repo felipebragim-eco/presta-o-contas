@@ -1,3 +1,4 @@
+import base64
 import copy
 import io
 import math
@@ -12,14 +13,56 @@ from openpyxl.styles import Alignment
 import streamlit as st
 from playwright.sync_api import sync_playwright
 
+CAMINHO_LOGO = "logo.png"
+CAMINHO_MODELO_PADRAO = "modelo.xlsx"
+
 # ================= CONFIGURAÇÃO DA PÁGINA =================
 st.set_page_config(
     page_title="Prestação de Contas & Reembolso | Eco Brasil",
-    page_icon="🧾",
+    page_icon=CAMINHO_LOGO if os.path.exists(CAMINHO_LOGO) else "🧾",
     layout="centered",
 )
 
-CAMINHO_MODELO_PADRAO = "modelo.xlsx"
+
+@st.cache_data
+def carregar_logo_base64(caminho: str) -> str:
+    """Converte a logo para base64 para exibição inline alinhada com os títulos."""
+    if not os.path.exists(caminho):
+        return ""
+    with open(caminho, "rb") as f:
+        return base64.b64encode(f.read()).decode("utf-8")
+
+
+LOGO_B64 = carregar_logo_base64(CAMINHO_LOGO)
+
+
+def titulo_com_logo(texto: str, nivel: int = 1):
+    """Exibe a logo da Eco Brasil ao lado dos títulos principais."""
+    if not LOGO_B64:
+        if nivel == 1:
+            st.title(texto)
+        else:
+            st.subheader(texto)
+        return
+
+    tamanho_img = 54 if nivel == 1 else 36
+    tamanho_fonte = "2.0rem" if nivel == 1 else "1.35rem"
+    margem_topo = "0.2rem" if nivel == 1 else "1.4rem"
+
+    st.markdown(
+        f"""
+        <div style="display: flex; align-items: center; gap: 14px; margin-top: {margem_topo}; margin-bottom: 0.6rem;">
+            <div style="background-color: #132219; padding: 6px 8px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                <img src="data:image/png;base64,{LOGO_B64}" style="height: {tamanho_img}px; width: auto; display: block;" />
+            </div>
+            <div style="font-size: {tamanho_fonte}; font-weight: 700; line-height: 1.2;">
+                {texto}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 
 CLASSES_VALOR_OFICIAIS = [
     "105001 - GESTÃO CORPORATIVA",
@@ -118,29 +161,6 @@ def converter_moeda_para_float(texto_moeda: str) -> float:
     return (int(digitos) / 100.0) if digitos else 0.0
 
 
-# ================= TELA DE ACESSO =================
-def verificar_acesso():
-    senha_correta = st.secrets.get("SENHA_ACESSO", "ecobrasil2026")
-    if st.session_state.get("autenticado"):
-        return True
-
-    st.title("Acesso Restrito — Eco Brasil Bioenergia")
-    st.markdown("Digite a senha corporativa para acessar o sistema de prestação de contas e reembolso:")
-    senha_digitada = st.text_input("Senha de acesso", type="password")
-    if st.button("Entrar", type="primary"):
-        if senha_digitada == senha_correta:
-            st.session_state["autenticado"] = True
-            st.rerun()
-        else:
-            st.error("Senha incorreta.")
-    return False
-
-
-if not verificar_acesso():
-    st.stop()
-
-
-# Inicializa estados das máscaras se ainda não existirem
 if "cpf_input" not in st.session_state:
     st.session_state["cpf_input"] = ""
 if "adiantamento_input" not in st.session_state:
@@ -148,13 +168,13 @@ if "adiantamento_input" not in st.session_state:
 
 
 # ================= INTERFACE PRINCIPAL =================
-st.title("Prestação de Contas & Reembolso (NFC-e)")
+titulo_com_logo("Prestação de Contas & Reembolso (NFC-e)", nivel=1)
 st.markdown(
     "Preencha os dados do relatório, envie as fotos dos cupons fiscais e baixe a planilha oficial pronta."
 )
 
 # 1. TIPO DE RELATÓRIO E DADOS DO SOLICITANTE
-st.subheader("Identificação e Tipo de Relatório")
+titulo_com_logo("1️⃣ Identificação e Tipo de Relatório", nivel=2)
 tipo_relatorio = st.radio(
     "Selecione o Tipo de Relatório:",
     options=["Relatório de Prestação de Contas", "Relatório de Reembolso"],
@@ -182,17 +202,17 @@ with col_resp2:
             "Valor do Adiantamento (digite só números)",
             key="adiantamento_input",
             on_change=formatar_moeda_banco_mascara,
-            help="Digite apenas os números (ex: 15000 vira R$ 150,00).",
+            help="Preenchimento estilo banco: digite apenas os números (ex: 15000 vira R$ 150,00).",
         )
         valor_adiantamento = converter_moeda_para_float(adiantamento_texto)
         data_adiantamento = st.date_input("Data do Adiantamento", value=date.today(), format="DD/MM/YYYY")
     else:
         valor_adiantamento = 0.0
         data_adiantamento = None
-        st.caption("No Relatório de Reembolso não há valor de adiantamento.")
+        st.caption("ℹ️ No Relatório de Reembolso não há valor de adiantamento.")
 
 # 2. DADOS BANCÁRIOS (PIX OU TRANSFERÊNCIA)
-st.subheader("Dados Bancários para Pagamento")
+titulo_com_logo("2️⃣ Dados Bancários para Pagamento", nivel=2)
 forma_pagamento = st.radio(
     "Forma de Pagamento:",
     options=["PAGAMENTO VIA PIX", "TRANSFERÊNCIA BANCÁRIA"],
@@ -232,7 +252,7 @@ else:
         )
 
 # 3. CLASSIFICAÇÃO CONTÁBIL
-with st.expander("Classe de Valor e Centro de Custo (Padrão TI — clique para alterar)", expanded=False):
+with st.expander("⚙️ Classe de Valor e Centro de Custo (Padrão TI — clique para alterar)", expanded=False):
     col_cc1, col_cc2 = st.columns(2)
     with col_cc1:
         classe_valor = st.selectbox("Classe de Valor", options=CLASSES_VALOR_OFICIAIS, index=0)
@@ -531,7 +551,7 @@ def gerar_planilha_final(
 
 
 # ================= UPLOAD E EXECUÇÃO =================
-st.subheader("Notas Fiscais (QR Code)")
+titulo_com_logo("3️⃣ Notas Fiscais (QR Code)", nivel=2)
 
 planilha_bytes = None
 nome_arquivo_saida = f"{tipo_relatorio.replace(' ', '_')}.xlsx"
@@ -551,7 +571,7 @@ else:
             planilha_bytes = arq_excel.getvalue()
 
 arquivos_fotos = st.file_uploader(
-    "Selecione ou tire foto dos cupons fiscais (QR Code)",
+    "📸 Selecione ou tire foto dos cupons fiscais (QR Code)",
     type=["jpg", "jpeg", "png", "bmp", "webp"],
     accept_multiple_files=True,
 )
@@ -584,7 +604,7 @@ def validar_campos_obrigatorios() -> list[str]:
 
 
 if planilha_bytes and arquivos_fotos:
-    if st.button("Processar Notas Fiscais", type="primary", use_container_width=True):
+    if st.button("🚀 Processar Notas Fiscais", type="primary", use_container_width=True):
         campos_faltantes = validar_campos_obrigatorios()
         if campos_faltantes:
             st.warning(f"Preencha corretamente antes de continuar: **{', '.join(campos_faltantes)}**.")
@@ -635,12 +655,12 @@ if "resultado" in st.session_state:
     notas_finais = list(res["aprovadas"])
 
     if res["ilegiveis"]:
-        st.error(f" **{len(res['ilegiveis'])} nota(s) ilegível(is) ou com erro na leitura:**")
+        st.error(f"⚠️ **{len(res['ilegiveis'])} nota(s) ilegível(is) ou com erro na leitura:**")
         for arq, motivo in res["ilegiveis"]:
             st.markdown(f"- **{arq}**: {motivo}")
 
     if res["duplicadas"]:
-        st.warning(f" **{len(res['duplicadas'])} nota(s) repetida(s) detectada(s):**")
+        st.warning(f"🔁 **{len(res['duplicadas'])} nota(s) repetida(s) detectada(s):**")
         for idx, dup in enumerate(res["duplicadas"]):
             incluir = st.checkbox(
                 f"Inserir mesmo assim: **{dup['arquivo']}** — {dup['emitente']} | NF `{dup['numero_nf']}` | "
@@ -669,9 +689,9 @@ if "resultado" in st.session_state:
         centro_custo,
     )
 
-    st.success(f"Planilha pronta com **{len(notas_finais)} nota(s)** lançada(s) e cabeçalho preenchido.")
+    st.success(f"✅ Planilha pronta com **{len(notas_finais)} nota(s)** lançada(s) e cabeçalho preenchido.")
     st.download_button(
-        label="Baixar Planilha Oficial Preenchida (.xlsx)",
+        label="📥 Baixar Planilha Oficial Preenchida (.xlsx)",
         data=excel_pronto,
         file_name=res["excel_nome"],
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

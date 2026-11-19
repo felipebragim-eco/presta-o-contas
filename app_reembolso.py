@@ -1,201 +1,86 @@
-import ctypes
+import io
 import os
 import re
-import shutil
 import subprocess
-import tempfile
-import time
 from datetime import datetime
-from tkinter import Button, Label, Radiobutton, StringVar, Tk, filedialog, messagebox
 import cv2
 import numpy as np
 import openpyxl
-import pyautogui
-import pyperclip
+import streamlit as st
+from playwright.sync_api import sync_playwright
 
-# ================= CONFIGURAÇÕES =================
-CLASSE_VALOR_PADRAO = "105001 - GESTÃO CORPORATIVA"
-CENTRO_CUSTO_PADRAO = "511001 - GESTAO TECNOLOGIA DA INFORMACAO"
+# ================= CONFIGURAÇÃO DA PÁGINA =================
+st.set_page_config(
+    page_title="Reembolso NFC-e | Eco Brasil",
+    page_icon="🧾",
+    layout="centered",
+)
 
-TEMPO_ESPERA_ABRIR_NAVEGADOR = 6.5  # Segundos para o navegador inicializar o perfil limpo
-TEMPO_ESPERA_CARREGAR_SEFAZ = 7.0   # Segundos para a página da SEFAZ carregar
-
-EXTENSOES_IMAGEM = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
-
-pyautogui.FAILSAFE = True
-pyautogui.PAUSE = 0.4
-# =================================================
+CAMINHO_MODELO_PADRAO = "modelo_reembolso.xlsx"
 
 
-def localizar_navegadores_disponiveis() -> dict:
-    """Verifica quais navegadores estão instalados na máquina."""
-    candidatos = {
-        "Mozilla Firefox": [
-            r"C:\Program Files\Mozilla Firefox\firefox.exe",
-            r"C:\Program Files (x86)\Mozilla Firefox\firefox.exe",
-            os.path.expandvars(r"%LOCALAPPDATA%\Mozilla Firefox\firefox.exe"),
-        ],
-        "Google Chrome": [
-            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-            os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
-        ],
-        "Microsoft Edge": [
-            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-        ],
-        "Opera GX": [
-            os.path.expandvars(r"%LOCALAPPDATA%\Programs\Opera GX\opera.exe"),
-            r"C:\Program Files\Opera GX\opera.exe",
-            r"C:\Program Files (x86)\Opera GX\opera.exe",
-        ],
-    }
-    comandos = {
-        "Mozilla Firefox": "firefox",
-        "Google Chrome": "chrome",
-        "Microsoft Edge": "msedge",
-        "Opera GX": "opera",
-    }
-
-    disponiveis = {}
-    for nome, caminhos in candidatos.items():
-        exe = next((p for p in caminhos if os.path.exists(p)), shutil.which(comandos[nome]))
-        if exe:
-            disponiveis[nome] = exe
-    return disponiveis
+# Garante que o binário do Firefox do Playwright esteja instalado no ambiente cloud
+@st.cache_resource
+def instalar_playwright():
+    subprocess.run(["playwright", "install", "firefox"], check=False)
 
 
-def escolher_navegador_gui(disponiveis: dict) -> tuple[str, str]:
-    """Exibe janela para o usuário escolher o navegador com guia anônima desbloqueada."""
-    if not disponiveis:
-        raise FileNotFoundError("Nenhum navegador compatível (Firefox, Chrome, Edge ou Opera GX) foi encontrado.")
-
-    selecionado = {"valor": None}
-
-    janela = Tk()
-    janela.title("Seleção de Navegador - NFC-e")
-    janela.attributes("-topmost", True)
-    janela.resizable(False, False)
-
-    # Centraliza a janela na tela
-    largura_win, altura_win = 470, 310
-    x = (janela.winfo_screenwidth() // 2) - (largura_win // 2)
-    y = (janela.winfo_screenheight() // 2) - (altura_win // 2)
-    janela.geometry(f"{largura_win}x{altura_win}+{x}+{y}")
-
-    Label(
-        janela,
-        text="Escolha o navegador para consultar as notas:",
-        font=("Segoe UI", 11, "bold"),
-    ).pack(pady=(15, 6))
-
-    Label(
-        janela,
-        text="AVISO IMPORTANTE:\n"
-             "O script utiliza a GUIA ANÔNIMA / PRIVATIVA para evitar bloqueios\n"
-             "de cookies da SEFAZ. Escolha um navegador onde essa função esteja\n"
-             "DESBLOQUEADA no seu computador.",
-        font=("Segoe UI", 9),
-        fg="#8a4b00",
-        bg="#fff8e6",
-        relief="solid",
-        bd=1,
-        padx=10,
-        pady=8,
-        justify="left",
-    ).pack(padx=20, pady=(0, 12), fill="x")
-
-    nomes = list(disponiveis.keys())
-    var_opcao = StringVar(value=nomes[0])
-
-    for nome in nomes:
-        Radiobutton(
-            janela,
-            text=nome,
-            variable=var_opcao,
-            value=nome,
-            font=("Segoe UI", 10),
-            anchor="w",
-        ).pack(padx=40, anchor="w")
-
-    def confirmar():
-        selecionado["valor"] = var_opcao.get()
-        janela.destroy()
-
-    Button(
-        janela,
-        text="Continuar",
-        command=confirmar,
-        font=("Segoe UI", 10, "bold"),
-        bg="#0066cc",
-        fg="white",
-        padx=20,
-        pady=5,
-    ).pack(pady=16)
-
-    janela.mainloop()
-
-    if not selecionado["valor"]:
-        raise SystemExit("Nenhum navegador selecionado. Encerrando.")
-
-    nome_escolhido = selecionado["valor"]
-    return nome_escolhido, disponiveis[nome_escolhido]
+instalar_playwright()
 
 
-def selecionar_origem_e_planilha():
-    """Permite escolher uma PASTA inteira de notas ou arquivos avulsos, e depois a planilha."""
-    root = Tk()
-    root.withdraw()
-    root.attributes("-topmost", True)
+# ================= TELA DE ACESSO (SENHA CORPORATIVA) =================
+def verificar_acesso():
+    senha_correta = st.secrets.get("SENHA_ACESSO", "ecobrasil2026")
+    if st.session_state.get("autenticado"):
+        return True
 
-    usar_pasta = messagebox.askyesno(
-        title="Modo de Seleção",
-        message="Deseja selecionar uma PASTA inteira com várias notas fiscais?\n\n"
-                "• Sim = Selecionar uma pasta completa\n"
-                "• Não = Selecionar arquivos individuais",
+    st.title("🔒 Acesso Restrito — Reembolso NFC-e")
+    st.markdown("Digite a senha corporativa para acessar o sistema de prestação de contas:")
+    senha_digitada = st.text_input("Senha de acesso", type="password")
+    if st.button("Entrar", type="primary"):
+        if senha_digitada == senha_correta:
+            st.session_state["autenticado"] = True
+            st.rerun()
+        else:
+            st.error("Senha incorreta.")
+    return False
+
+
+if not verificar_acesso():
+    st.stop()
+
+
+# ================= INTERFACE PRINCIPAL =================
+st.title("🧾 Prestação de Contas Automática (NFC-e)")
+st.markdown(
+    "Tire foto dos cupons fiscais ou selecione da galeria. "
+    "O sistema lê os QR Codes, consulta a SEFAZ-SP e gera a planilha pronta para envio."
+)
+
+with st.sidebar:
+    st.header("⚙️ Dados do Colaborador")
+    classe_valor = st.text_input(
+        "Classe de Valor",
+        value="105001 - GESTÃO CORPORATIVA",
+    )
+    centro_custo = st.text_input(
+        "Centro de Custo",
+        value="511001 - GESTAO TECNOLOGIA DA INFORMACAO",
+    )
+    st.divider()
+    usar_planilha_propria = st.checkbox(
+        "Continuar uma planilha já iniciada",
+        value=False,
+        help="Marque apenas se quiser adicionar notas em um arquivo .xlsx que já possui lançamentos.",
     )
 
-    imagens = []
-    if usar_pasta:
-        print("Selecione a PASTA contendo as imagens das notas fiscais...")
-        pasta = filedialog.askdirectory(title="Selecione a Pasta com as Notas Fiscais")
-        if not pasta:
-            raise SystemExit("Nenhuma pasta selecionada. Encerrando.")
 
-        for nome_arq in sorted(os.listdir(pasta)):
-            if nome_arq.lower().endswith(EXTENSOES_IMAGEM):
-                imagens.append(os.path.join(pasta, nome_arq))
-
-        if not imagens:
-            raise SystemExit(f"Nenhuma imagem encontrada na pasta: {pasta}")
-    else:
-        print("Selecione a(s) imagem(ns) do QR Code das notas fiscais...")
-        arquivos = filedialog.askopenfilenames(
-            title="Selecione as imagens das Notas Fiscais",
-            filetypes=[("Imagens", "*.jpg *.jpeg *.png *.bmp *.webp"), ("Todos os arquivos", "*.*")],
-        )
-        if not arquivos:
-            raise SystemExit("Nenhuma imagem selecionada. Encerrando.")
-        imagens = list(arquivos)
-
-    print("Selecione a planilha Excel de Prestação de Contas...")
-    planilha = filedialog.askopenfilename(
-        title="Selecione a Planilha Excel",
-        filetypes=[("Planilhas Excel", "*.xlsx")],
-    )
-    if not planilha:
-        raise SystemExit("Nenhuma planilha selecionada. Encerrando.")
-
-    root.destroy()
-    return imagens, planilha
-
-
-def ler_qrcode(caminho_imagem: str) -> str:
-    """Lê a URL exata do QR Code sem alterar o hash de assinatura."""
-    dados_bytes = np.fromfile(caminho_imagem, dtype=np.uint8)
-    img = cv2.imdecode(dados_bytes, cv2.IMREAD_COLOR)
+# ================= FUNÇÕES DE EXTRAÇÃO E PARSER =================
+def ler_qrcode_bytes(file_bytes: bytes) -> str:
+    arr = np.frombuffer(file_bytes, np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     if img is None:
-        raise FileNotFoundError(f"Não foi possível abrir o arquivo de imagem.")
+        raise ValueError("Arquivo de imagem inválido ou corrompido.")
 
     detector = cv2.QRCodeDetector()
     url, _, _ = detector.detectAndDecode(img)
@@ -209,115 +94,12 @@ def ler_qrcode(caminho_imagem: str) -> str:
                 break
 
     if not url:
-        raise ValueError("QR Code ilegível, borrado ou não encontrado na foto.")
+        raise ValueError("QR Code ilegível, borrado ou cortado na foto.")
 
     return url.strip()
 
 
-def preparar_perfil_firefox(pasta_perfil: str):
-    """Desativa telas de boas-vindas e popups iniciais no Firefox."""
-    prefs = """
-user_pref("browser.startup.homepage_override.mstone", "ignore");
-user_pref("startup.homepage_welcome_url", "");
-user_pref("startup.homepage_welcome_url.additional", "");
-user_pref("startup.homepage_override_url", "");
-user_pref("browser.aboutwelcome.enabled", false);
-user_pref("datareporting.policy.firstRunURL", "");
-user_pref("datareporting.policy.dataSubmissionPolicyBypassNotification", true);
-user_pref("browser.shell.checkDefaultBrowser", false);
-user_pref("browser.messaging-system.whatsNewPanel.enabled", false);
-user_pref("trailhead.firstrun.didSeeAboutWelcome", true);
-"""
-    with open(os.path.join(pasta_perfil, "user.js"), "w", encoding="utf-8") as f:
-        f.write(prefs.strip())
-
-
-def aguardar_janela_ativa(palavras_chave: list[str], timeout: float = 15.0) -> bool:
-    """Aguarda até que uma janela do navegador escolhido fique em primeiro plano."""
-    user32 = ctypes.windll.user32
-    inicio = time.time()
-    while time.time() - inicio < timeout:
-        hwnd = user32.GetForegroundWindow()
-        if hwnd:
-            tamanho = user32.GetWindowTextLengthW(hwnd)
-            buffer = ctypes.create_unicode_buffer(tamanho + 1)
-            user32.GetWindowTextW(hwnd, buffer, tamanho + 1)
-            titulo = buffer.value.lower()
-            if any(p.lower() in titulo for p in palavras_chave):
-                return True
-        time.sleep(0.5)
-    return False
-
-
-def capturar_dados_no_navegador(nome_nav: str, exe_nav: str, url: str) -> dict:
-    """Abre o navegador escolhido em guia anônima/privativa com perfil limpo e extrai os dados."""
-    pasta_perfil_temp = tempfile.mkdtemp(prefix="nfce_nav_")
-
-    try:
-        if nome_nav == "Mozilla Firefox":
-            preparar_perfil_firefox(pasta_perfil_temp)
-            cmd = [exe_nav, "-no-remote", "-profile", pasta_perfil_temp, "-private-window", "about:blank"]
-            palavras = ["Firefox", "Mozilla", "Navegação privativa", "Private Browsing"]
-        elif nome_nav == "Google Chrome":
-            cmd = [exe_nav, "--incognito", f"--user-data-dir={pasta_perfil_temp}", "--no-first-run", "--no-default-browser-check", "--start-maximized", "about:blank"]
-            palavras = ["Chrome", "anônima", "Incognito"]
-        elif nome_nav == "Microsoft Edge":
-            cmd = [exe_nav, "--inprivate", f"--user-data-dir={pasta_perfil_temp}", "--no-first-run", "--no-default-browser-check", "--start-maximized", "about:blank"]
-            palavras = ["Edge", "InPrivate"]
-        else:  # Opera GX
-            cmd = [exe_nav, "--private", f"--user-data-dir={pasta_perfil_temp}", "--no-first-run", "--start-maximized", "about:blank"]
-            palavras = ["Opera", "Privada", "Private"]
-
-        subprocess.Popen(cmd)
-        print(f"   Aguardando a guia anônima do {nome_nav} abrir...")
-        aguardar_janela_ativa(palavras, timeout=15.0)
-        time.sleep(TEMPO_ESPERA_ABRIR_NAVEGADOR)
-
-        # Garante fechamento de qualquer popup residual e foca a janela
-        pyautogui.press("enter")
-        time.sleep(0.4)
-        largura, altura = pyautogui.size()
-        pyautogui.click(largura // 2, altura // 2)
-        time.sleep(0.4)
-
-        # Cola a URL na barra de endereços
-        pyperclip.copy(url)
-        pyautogui.hotkey("ctrl", "l")
-        time.sleep(0.4)
-        pyautogui.hotkey("ctrl", "v")
-        time.sleep(0.4)
-        pyautogui.press("enter")
-
-        print(f"   Aguardando {TEMPO_ESPERA_CARREGAR_SEFAZ}s para a página da SEFAZ carregar...")
-        time.sleep(TEMPO_ESPERA_CARREGAR_SEFAZ)
-
-        pyautogui.click(largura // 2, altura // 2)
-        time.sleep(0.4)
-        pyperclip.copy("")
-        pyautogui.hotkey("ctrl", "a")
-        time.sleep(0.4)
-        pyautogui.hotkey("ctrl", "c")
-        time.sleep(0.5)
-        texto_pagina = pyperclip.paste()
-
-        pyautogui.hotkey("alt", "f4")
-        time.sleep(1.5)
-
-        if "The requested URL was rejected" in texto_pagina:
-            raise RuntimeError("A URL foi rejeitada pelo firewall da SEFAZ (tente outro navegador).")
-
-        dados = extrair_campos_texto(texto_pagina)
-        if not dados["numero_nf"] and dados["valor_total"] == 0.0:
-            raise RuntimeError("Não foi possível ler os dados na página (página em branco, guia anônima bloqueada ou lentidão).")
-
-        return dados
-
-    finally:
-        shutil.rmtree(pasta_perfil_temp, ignore_errors=True)
-
-
 def extrair_campos_texto(texto: str) -> dict:
-    """Extrai Emitente, Número, Data, Valor Total e apenas os produtos reais da SEFAZ-SP."""
     linhas = [linha.strip() for linha in texto.splitlines() if linha.strip()]
 
     emitente = ""
@@ -358,8 +140,45 @@ def extrair_campos_texto(texto: str) -> dict:
     }
 
 
+def consultar_sefaz_em_lote(lista_urls: list[tuple[str, str]]) -> tuple[list[dict], list[tuple[str, str]]]:
+    notas_validas = []
+    falhas = []
+
+    with sync_playwright() as p:
+        browser = p.firefox.launch(headless=True)
+        for nome_arq, url in lista_urls:
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0",
+                locale="pt-BR",
+            )
+            page = context.new_page()
+            try:
+                page.goto(url, wait_until="networkidle", timeout=25000)
+                texto_pagina = page.inner_text("body")
+
+                if "The requested URL was rejected" in texto_pagina:
+                    falhas.append((nome_arq, "Bloqueio temporário do firewall da SEFAZ. Tente reenviar esta foto."))
+                    continue
+
+                dados = extrair_campos_texto(texto_pagina)
+                if not dados["numero_nf"] and dados["valor_total"] == 0.0:
+                    falhas.append((nome_arq, "Portal da SEFAZ não retornou os dados da nota."))
+                    continue
+
+                dados["arquivo"] = nome_arq
+                notas_validas.append(dados)
+
+            except Exception as e:
+                falhas.append((nome_arq, f"Falha ao acessar SEFAZ: {str(e)[:70]}"))
+            finally:
+                context.close()
+
+        browser.close()
+
+    return notas_validas, falhas
+
+
 def classificar_despesa(emitente: str, itens: list[str]) -> str:
-    """Classifica a despesa dentro das 5 opções válidas da planilha."""
     conteudo = f"{emitente} {' '.join(itens)}".upper()
     if any(k in conteudo for k in ["POSTO", "COMBUST", "GASOLINA", "ETANOL", "DIESEL"]):
         return "COMBUSTÍVEL"
@@ -372,172 +191,166 @@ def classificar_despesa(emitente: str, itens: list[str]) -> str:
     return "ALIMENTAÇÃO"
 
 
-def verificar_duplicidade_na_planilha(ws, dados: dict) -> str | None:
-    """Verifica se a nota já existe na planilha (por Número da NF ou Data + Emitente + Valor)."""
+def checar_duplicidade(ws, dados: dict, lancadas_sessao: list[dict]) -> str | None:
     for row in range(30, 71):
-        nf_planilha = str(ws[f"C{row}"].value or "").strip()
-        obs_planilha = str(ws[f"F{row}"].value or "").strip().upper()
-        val_planilha = ws[f"J{row}"].value
-        data_planilha = ws[f"B{row}"].value
+        nf_plan = str(ws[f"C{row}"].value or "").strip()
+        obs_plan = str(ws[f"F{row}"].value or "").strip().upper()
+        val_plan = ws[f"J{row}"].value
+        data_plan = ws[f"B{row}"].value
+        data_str = data_plan.strftime("%d/%m/%Y") if isinstance(data_plan, datetime) else str(data_plan or "").strip()
 
-        data_str = ""
-        if isinstance(data_planilha, datetime):
-            data_str = data_planilha.strftime("%d/%m/%Y")
-        elif data_planilha:
-            data_str = str(data_planilha).strip()
+        if dados["numero_nf"] and nf_plan == dados["numero_nf"]:
+            return f"Já consta na linha {row} da planilha (NF {nf_plan})."
 
-        # 1. Mesmo número de NF-e
-        if dados["numero_nf"] and nf_planilha == dados["numero_nf"]:
-            return f"Linha {row} já possui a NF nº {nf_planilha} ({obs_planilha})."
-
-        # 2. Mesma Data, mesmo Emitente e mesmo Valor (caso tenha sido lançada sem o zero à esquerda)
         if (
             dados["emitente"]
-            and dados["emitente"].upper() in obs_planilha
+            and dados["emitente"].upper() in obs_plan
             and data_str == dados["data_emissao"]
-            and isinstance(val_planilha, (int, float))
-            and round(float(val_planilha), 2) == round(dados["valor_total"], 2)
+            and isinstance(val_plan, (int, float))
+            and round(float(val_plan), 2) == round(dados["valor_total"], 2)
         ):
-            return f"Linha {row} já possui lançamento idêntico ({dados['emitente']} em {data_str} no valor de R$ {dados['valor_total']:.2f})."
+            return f"Lançamento idêntico na linha {row} ({dados['emitente']} - R$ {dados['valor_total']:.2f})."
+
+    for outra in lancadas_sessao:
+        if dados["numero_nf"] and outra["numero_nf"] == dados["numero_nf"]:
+            return f"Nota repetida com a foto '{outra['arquivo']}' enviada neste mesmo lote."
 
     return None
 
 
-def perguntar_inserir_duplicada(nome_arquivo: str, dados: dict, motivo_duplicidade: str) -> bool:
-    """Mostra um alerta visual perguntando se o usuário deseja inserir a nota repetida mesmo assim."""
-    root = Tk()
-    root.withdraw()
-    root.attributes("-topmost", True)
-
-    resposta = messagebox.askyesno(
-        title="Aviso: Nota Fiscal Repetida Detectada",
-        message=(
-            f"A imagem '{nome_arquivo}' parece conter uma nota repetida!\n\n"
-            f"Motivo: {motivo_duplicidade}\n\n"
-            f"Dados lidos agora:\n"
-            f"• Emitente: {dados['emitente']}\n"
-            f"• Número NF: {dados['numero_nf']}\n"
-            f"• Data: {dados['data_emissao']}\n"
-            f"• Valor: R$ {dados['valor_total']:.2f}\n\n"
-            f"Deseja inserir esta nota na planilha MESMO ASSIM?"
-        ),
-        icon="warning",
-    )
-    root.destroy()
-    return resposta
-
-
-def preencher_planilha(caminho_excel: str, dados: dict, nome_arquivo: str) -> bool:
-    """Insere os dados na próxima linha vazia (entre 30 e 70). Retorna True se salvou, False se pulou."""
-    wb = openpyxl.load_workbook(caminho_excel)
+def gerar_planilha_final(planilha_bytes: bytes, notas_para_inserir: list[dict], classe_val: str, centro_cus: str) -> bytes:
+    wb = openpyxl.load_workbook(io.BytesIO(planilha_bytes))
     ws = wb["RELATÓRIO DE CONTAS"]
 
-    motivo_dup = verificar_duplicidade_na_planilha(ws, dados)
-    if motivo_dup:
-        print(f"   [Aviso Duplicidade] {motivo_dup}")
-        if not perguntar_inserir_duplicada(nome_arquivo, dados, motivo_dup):
-            print("   -> Usuário optou por NÃO inserir a nota repetida. Pulando...")
-            return False
-        print("   -> Usuário optou por inserir mesmo assim.")
+    for dados in notas_para_inserir:
+        linha_destino = None
+        for row in range(30, 71):
+            if ws[f"B{row}"].value is None and ws[f"C{row}"].value is None:
+                linha_destino = row
+                break
 
-    linha_destino = None
-    for row in range(30, 71):
-        if ws[f"B{row}"].value is None and ws[f"C{row}"].value is None:
-            linha_destino = row
-            break
+        if linha_destino is None:
+            raise RuntimeError("A planilha atingiu o limite máximo (linha 70).")
 
-    if linha_destino is None:
-        raise RuntimeError("Não há mais linhas disponíveis na tabela (linhas 30 a 70).")
+        categoria = classificar_despesa(dados["emitente"], dados["itens"])
+        resumo_itens = ", ".join(dados["itens"][:3])
+        observacao = f"{dados['emitente']} - {resumo_itens}" if resumo_itens else dados["emitente"]
+        data_dt = datetime.strptime(dados["data_emissao"], "%d/%m/%Y") if dados["data_emissao"] else ""
 
-    categoria = classificar_despesa(dados["emitente"], dados["itens"])
-    resumo_itens = ", ".join(dados["itens"][:3])
-    observacao = f"{dados['emitente']} - {resumo_itens}" if resumo_itens else dados["emitente"]
+        ws[f"B{linha_destino}"] = data_dt
+        ws[f"B{linha_destino}"].number_format = "DD/MM/YYYY"
+        ws[f"C{linha_destino}"] = dados["numero_nf"]
+        ws[f"D{linha_destino}"] = categoria
+        ws[f"F{linha_destino}"] = observacao
+        ws[f"H{linha_destino}"] = classe_val
+        ws[f"I{linha_destino}"] = centro_cus
+        ws[f"J{linha_destino}"] = dados["valor_total"]
+        ws[f"J{linha_destino}"].number_format = "#,##0.00"
 
-    data_dt = datetime.strptime(dados["data_emissao"], "%d/%m/%Y") if dados["data_emissao"] else ""
-
-    ws[f"B{linha_destino}"] = data_dt
-    ws[f"B{linha_destino}"].number_format = "DD/MM/YYYY"
-    ws[f"C{linha_destino}"] = dados["numero_nf"]
-    ws[f"D{linha_destino}"] = categoria
-    ws[f"F{linha_destino}"] = observacao
-    ws[f"H{linha_destino}"] = CLASSE_VALOR_PADRAO
-    ws[f"I{linha_destino}"] = CENTRO_CUSTO_PADRAO
-    ws[f"J{linha_destino}"] = dados["valor_total"]
-    ws[f"J{linha_destino}"].number_format = "#,##0.00"
-
-    while True:
-        try:
-            wb.save(caminho_excel)
-            break
-        except PermissionError:
-            input(
-                f"\n[AVISO] A planilha '{os.path.basename(caminho_excel)}' está aberta no Excel.\n"
-                "Feche o arquivo no Excel e pressione ENTER aqui para salvar..."
-            )
-
-    print(f"   -> Planilha atualizada na linha {linha_destino}!")
-    return True
+    saida = io.BytesIO()
+    wb.save(saida)
+    return saida.getvalue()
 
 
-def exibir_resumo_final(total: int, sucessos: int, puladas: int, ilegiveis: list[tuple[str, str]]):
-    """Exibe resumo no console e abre janela de alerta caso alguma nota esteja ilegível."""
-    print("\n" + "=" * 55)
-    print(f"PROCESSAMENTO FINALIZADO:")
-    print(f" • Notas lançadas com sucesso: {sucessos}/{total}")
-    if puladas:
-        print(f" • Notas repetidas ignoradas:  {puladas}")
-    if ilegiveis:
-        print(f" • Notas ilegíveis / com erro: {len(ilegiveis)}")
-        for arq, motivo in ilegiveis:
-            print(f"    - {arq}: {motivo}")
-    print("=" * 55)
+# ================= UPLOAD E EXECUÇÃO =================
+planilha_bytes = None
+nome_planilha_base = "Prestacao_de_Contas_Preenchida.xlsx"
 
-    if ilegiveis:
-        lista_formatada = "\n".join([f"• {arq} ({motivo})" for arq, motivo in ilegiveis])
-        root = Tk()
-        root.withdraw()
-        root.attributes("-topmost", True)
-        messagebox.showwarning(
-            title="Atenção: Notas Fiscais Ilegíveis",
-            message=(
-                f"O processamento foi concluído ({sucessos} lançadas), porém "
-                f"{len(ilegiveis)} nota(s) não puderam ser lidas e precisam ser verificadas manualmente:\n\n"
-                f"{lista_formatada}"
-            ),
-        )
-        root.destroy()
+if usar_planilha_propria:
+    arq_excel = st.file_uploader("Envie sua planilha já iniciada (.xlsx)", type=["xlsx"])
+    if arq_excel:
+        planilha_bytes = arq_excel.getvalue()
+        nome_planilha_base = f"Atualizada_{arq_excel.name}"
+else:
+    if os.path.exists(CAMINHO_MODELO_PADRAO):
+        with open(CAMINHO_MODELO_PADRAO, "rb") as f:
+            planilha_bytes = f.read()
+        st.caption("📄 Usando automaticamente a planilha padrão oficial da empresa.")
+    else:
+        arq_excel = st.file_uploader("Envie a planilha modelo (.xlsx)", type=["xlsx"])
+        if arq_excel:
+            planilha_bytes = arq_excel.getvalue()
 
+arquivos_fotos = st.file_uploader(
+    "📸 Selecione ou tire foto dos cupons fiscais (QR Code)",
+    type=["jpg", "jpeg", "png", "bmp", "webp"],
+    accept_multiple_files=True,
+)
 
-if __name__ == "__main__":
-    navegadores = localizar_navegadores_disponiveis()
-    nome_navegador, exe_navegador = escolher_navegador_gui(navegadores)
-    print(f"Navegador selecionado: {nome_navegador}")
+if planilha_bytes and arquivos_fotos:
+    if st.button("🚀 Processar Notas Fiscais", type="primary", use_container_width=True):
+        with st.status("Lendo QR Codes e consultando a SEFAZ-SP...", expanded=True) as status:
+            urls_para_consultar = []
+            ilegiveis = []
 
-    lista_imagens, caminho_planilha = selecionar_origem_e_planilha()
-    print(f"\nTotal de imagens encontradas para processar: {len(lista_imagens)}")
+            for foto in arquivos_fotos:
+                try:
+                    url = ler_qrcode_bytes(foto.getvalue())
+                    urls_para_consultar.append((foto.name, url))
+                except Exception as e:
+                    ilegiveis.append((foto.name, str(e)))
 
-    sucessos = 0
-    puladas = 0
-    notas_ilegiveis = []
+            st.write(f"QR Codes identificados: **{len(urls_para_consultar)}** | Ilegíveis: **{len(ilegiveis)}**")
 
-    for idx, img_path in enumerate(lista_imagens, start=1):
-        nome_arquivo = os.path.basename(img_path)
-        print(f"\n[{idx}/{len(lista_imagens)}] Processando: {nome_arquivo}")
-        try:
-            url_sefaz = ler_qrcode(img_path)
-            print("   URL lida:", url_sefaz)
+            notas_lidas, falhas_sefaz = consultar_sefaz_em_lote(urls_para_consultar)
+            ilegiveis.extend(falhas_sefaz)
+            status.update(label="Consulta concluída!", state="complete", expanded=False)
 
-            dados_nota = capturar_dados_no_navegador(nome_navegador, exe_navegador, url_sefaz)
-            print("   Dados extraídos:", dados_nota)
+        wb_temp = openpyxl.load_workbook(io.BytesIO(planilha_bytes))
+        ws_temp = wb_temp["RELATÓRIO DE CONTAS"]
 
-            inserida = preencher_planilha(caminho_planilha, dados_nota, nome_arquivo)
-            if inserida:
-                sucessos += 1
+        aprovadas_direto = []
+        duplicadas_encontradas = []
+        vistos = []
+
+        for nota in notas_lidas:
+            motivo = checar_duplicidade(ws_temp, nota, vistos)
+            if motivo:
+                nota["motivo_duplicidade"] = motivo
+                duplicadas_encontradas.append(nota)
             else:
-                puladas += 1
+                aprovadas_direto.append(nota)
+            vistos.append(nota)
 
-        except Exception as erro:
-            print(f"   [ILEGÍVEL / ERRO] '{nome_arquivo}': {erro}")
-            notas_ilegiveis.append((nome_arquivo, str(erro)))
+        st.session_state["resultado"] = {
+            "excel_bytes": planilha_bytes,
+            "excel_nome": nome_planilha_base,
+            "aprovadas": aprovadas_direto,
+            "duplicadas": duplicadas_encontradas,
+            "ilegiveis": ilegiveis,
+        }
 
-    exibir_resumo_final(len(lista_imagens), sucessos, puladas, notas_ilegiveis)
+if "resultado" in st.session_state:
+    res = st.session_state["resultado"]
+    notas_finais = list(res["aprovadas"])
+
+    if res["ilegiveis"]:
+        st.error(f"⚠️ **{len(res['ilegiveis'])} nota(s) ilegível(is) ou com erro na leitura:**")
+        for arq, motivo in res["ilegiveis"]:
+            st.markdown(f"- **{arq}**: {motivo}")
+
+    if res["duplicadas"]:
+        st.warning(f"🔁 **{len(res['duplicadas'])} nota(s) repetida(s) detectada(s):**")
+        for idx, dup in enumerate(res["duplicadas"]):
+            incluir = st.checkbox(
+                f"Inserir mesmo assim: **{dup['arquivo']}** — {dup['emitente']} | NF `{dup['numero_nf']}` | "
+                f"Data: {dup['data_emissao']} | R$ {dup['valor_total']:.2f} *({dup['motivo_duplicidade']})*",
+                key=f"dup_{idx}",
+                value=False,
+            )
+            if incluir:
+                notas_finais.append(dup)
+
+    if notas_finais:
+        st.success(f"✅ **{len(notas_finais)} nota(s)** prontas para gravação na planilha.")
+        excel_pronto = gerar_planilha_final(res["excel_bytes"], notas_finais, classe_valor, centro_custo)
+        st.download_button(
+            label="📥 Baixar Planilha Preenchida (.xlsx)",
+            data=excel_pronto,
+            file_name=res["excel_nome"],
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary",
+            use_container_width=True,
+        )
+    else:
+        st.info("Nenhuma nota nova selecionada para inserção na planilha.")

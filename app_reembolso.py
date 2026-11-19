@@ -14,8 +14,7 @@ from playwright.sync_api import sync_playwright
 
 # ================= CONFIGURAÇÃO DA PÁGINA =================
 st.set_page_config(
-    page_title="Prestação de Contas & Reembolso | Eco Brasil",
-    page_icon="🧾",
+    page_title="Prestação de Contas e Reembolso | Eco Brasil Bioenergia",
     layout="centered",
 )
 
@@ -89,9 +88,33 @@ def instalar_playwright():
 instalar_playwright()
 
 
-# ================= FUNÇÕES DE MÁSCARA ESTILO BANCO =================
+# ================= TELA DE ACESSO (SENHA CORPORATIVA) =================
+def verificar_acesso():
+    senha_correta = st.secrets.get("SENHA_ACESSO", "ecobrasil2026")
+    if st.session_state.get("autenticado"):
+        return True
+
+    st.title("Acesso Restrito — Eco Brasil Bioenergia")
+    st.markdown("Informe a senha corporativa para acessar o portal de prestação de contas e reembolso.")
+    with st.form("form_login"):
+        senha_digitada = st.text_input("Senha de acesso", type="password")
+        entrar = st.form_submit_button("Acessar Sistema", type="primary")
+        if entrar:
+            if senha_digitada == senha_correta:
+                st.session_state["autenticado"] = True
+                st.rerun()
+            else:
+                st.error("Credencial inválida. Verifique a senha informada e tente novamente.")
+    return False
+
+
+if not verificar_acesso():
+    st.stop()
+
+
+# ================= FUNÇÕES DE MÁSCARA ESTILO BANCÁRIO =================
 def formatar_cpf_mascara():
-    """Aplica máscara 111.111.111-11 automaticamente ao digitar no campo CPF."""
+    """Aplica máscara 000.000.000-00 automaticamente ao digitar no campo CPF."""
     digitos = re.sub(r"\D", "", st.session_state.get("cpf_input", ""))[:11]
     if len(digitos) <= 3:
         formatado = digitos
@@ -105,7 +128,7 @@ def formatar_cpf_mascara():
 
 
 def formatar_moeda_banco_mascara():
-    """Formata o valor estilo aplicativo bancário (centavos da direita para a esquerda: R$ 1.234,56)."""
+    """Formata o valor monetário no padrão bancário (R$ 0,00)."""
     digitos = re.sub(r"\D", "", st.session_state.get("adiantamento_input", ""))
     centavos = int(digitos) if digitos else 0
     valor_float = centavos / 100.0
@@ -118,7 +141,6 @@ def converter_moeda_para_float(texto_moeda: str) -> float:
     return (int(digitos) / 100.0) if digitos else 0.0
 
 
-# Inicializa estados das máscaras se ainda não existirem
 if "cpf_input" not in st.session_state:
     st.session_state["cpf_input"] = ""
 if "adiantamento_input" not in st.session_state:
@@ -126,53 +148,53 @@ if "adiantamento_input" not in st.session_state:
 
 
 # ================= INTERFACE PRINCIPAL =================
-st.title("🧾 Prestação de Contas & Reembolso (NFC-e)")
+st.title("Prestação de Contas e Reembolso (NFC-e)")
 st.markdown(
-    "Preencha os dados do relatório, envie as fotos dos cupons fiscais e baixe a planilha oficial pronta."
+    "Preencha os dados cadastrais, anexe as imagens dos comprovantes fiscais e realize o download da planilha preenchida."
 )
 
-# 1. TIPO DE RELATÓRIO E DADOS DO SOLICITANTE
-st.subheader("1️⃣ Identificação e Tipo de Relatório")
+# 1. IDENTIFICAÇÃO E TIPO DE RELATÓRIO
+st.subheader("1. Identificação e Natureza do Relatório")
 tipo_relatorio = st.radio(
-    "Selecione o Tipo de Relatório:",
+    "Tipo de Relatório:",
     options=["Relatório de Prestação de Contas", "Relatório de Reembolso"],
     horizontal=True,
 )
 
 col_sol1, col_sol2 = st.columns([2, 1])
 with col_sol1:
-    nome_solicitante = st.text_input("Nome do Solicitante *", placeholder="Ex: João da Silva")
+    nome_solicitante = st.text_input("Nome Completo do Solicitante *", placeholder="Informe o nome completo")
 with col_sol2:
     cpf_solicitante = st.text_input(
-        "CPF * (digite apenas números)",
+        "CPF * (somente números)",
         key="cpf_input",
         on_change=formatar_cpf_mascara,
-        placeholder="111.111.111-11",
+        placeholder="000.000.000-00",
         max_chars=14,
     )
 
 col_resp1, col_resp2 = st.columns([2, 1])
 with col_resp1:
-    responsavel_area = st.text_input("Responsável da Área *", placeholder="Nome do gestor responsável")
+    responsavel_area = st.text_input("Responsável pela Área *", placeholder="Informe o gestor responsável")
 with col_resp2:
     if tipo_relatorio == "Relatório de Prestação de Contas":
         adiantamento_texto = st.text_input(
-            "Valor do Adiantamento (digite só números)",
+            "Valor do Adiantamento (somente números)",
             key="adiantamento_input",
             on_change=formatar_moeda_banco_mascara,
-            help="Preenchimento estilo banco: digite apenas os números (ex: 15000 vira R$ 150,00).",
+            help="Informe apenas os dígitos numéricos. Exemplo: 15000 será formatado como R$ 150,00.",
         )
         valor_adiantamento = converter_moeda_para_float(adiantamento_texto)
         data_adiantamento = st.date_input("Data do Adiantamento", value=date.today(), format="DD/MM/YYYY")
     else:
         valor_adiantamento = 0.0
         data_adiantamento = None
-        st.caption("ℹ️ No Relatório de Reembolso não há valor de adiantamento.")
+        st.caption("Observação: O Relatório de Reembolso não possui lançamento de adiantamento.")
 
-# 2. DADOS BANCÁRIOS (PIX OU TRANSFERÊNCIA)
-st.subheader("2️⃣ Dados Bancários para Pagamento")
+# 2. DADOS BANCÁRIOS
+st.subheader("2. Dados Bancários para Crédito")
 forma_pagamento = st.radio(
-    "Forma de Pagamento:",
+    "Modalidade de Pagamento:",
     options=["PAGAMENTO VIA PIX", "TRANSFERÊNCIA BANCÁRIA"],
     horizontal=True,
 )
@@ -183,34 +205,34 @@ if forma_pagamento == "PAGAMENTO VIA PIX":
     c_pix1, c_pix2, c_pix3 = st.columns([1, 1.5, 1.5])
     with c_pix1:
         dados_bancarios["tipo_chave"] = st.selectbox(
-            "Tipo da Chave PIX *",
+            "Tipo de Chave PIX *",
             options=["CPF", "TELEFONE", "E-MAIL", "CHAVE ALEATÓRIA"],
         )
     with c_pix2:
-        dados_bancarios["chave_pix"] = st.text_input("Chave PIX *", placeholder="Informe a chave PIX")
+        dados_bancarios["chave_pix"] = st.text_input("Chave PIX *", placeholder="Informe a chave cadastrada")
     with c_pix3:
         dados_bancarios["responsavel_conta"] = st.text_input(
-            "Responsável pela Conta *",
+            "Titular da Conta *",
             value=nome_solicitante,
-            placeholder="Titular da conta PIX",
+            placeholder="Nome do titular da conta",
         )
 else:
     c_ted1, c_ted2, c_ted3, c_ted4 = st.columns([1.2, 1, 0.8, 1.5])
     with c_ted1:
-        dados_bancarios["banco"] = st.text_input("Banco *", placeholder="Ex: Banco do Brasil / Itaú")
+        dados_bancarios["banco"] = st.text_input("Instituição Bancária *", placeholder="Ex.: Banco do Brasil / Itaú")
     with c_ted2:
-        dados_bancarios["conta"] = st.text_input("Conta (com dígito) *", placeholder="Ex: 12345-6")
+        dados_bancarios["conta"] = st.text_input("Conta Corrente (com dígito) *", placeholder="Ex.: 12345-6")
     with c_ted3:
-        dados_bancarios["agencia"] = st.text_input("Agência *", placeholder="Ex: 0001")
+        dados_bancarios["agencia"] = st.text_input("Agência *", placeholder="Ex.: 0001")
     with c_ted4:
         dados_bancarios["responsavel_conta"] = st.text_input(
-            "Responsável pela Conta *",
+            "Titular da Conta *",
             value=nome_solicitante,
-            placeholder="Titular da conta bancária",
+            placeholder="Nome do titular da conta",
         )
 
 # 3. CLASSIFICAÇÃO CONTÁBIL
-with st.expander("⚙️ Classe de Valor e Centro de Custo (Padrão TI — clique para alterar)", expanded=False):
+with st.expander("Parâmetros Contábeis (Classe de Valor e Centro de Custo)", expanded=False):
     col_cc1, col_cc2 = st.columns(2)
     with col_cc1:
         classe_valor = st.selectbox("Classe de Valor", options=CLASSES_VALOR_OFICIAIS, index=0)
@@ -218,7 +240,7 @@ with st.expander("⚙️ Classe de Valor e Centro de Custo (Padrão TI — cliqu
         centro_custo = st.selectbox("Centro de Custo", options=CENTROS_CUSTO_OFICIAIS, index=0)
 
     usar_planilha_propria = st.checkbox(
-        "Continuar a partir de uma planilha já iniciada (.xlsx)",
+        "Utilizar planilha já iniciada (.xlsx) para complementar lançamentos existentes",
         value=False,
     )
 
@@ -242,7 +264,7 @@ def ler_qrcode_bytes(file_bytes: bytes) -> str:
                 break
 
     if not url:
-        raise ValueError("QR Code ilegível, borrado ou cortado na foto.")
+        raise ValueError("QR Code ilegível, desfocado ou cortado na imagem.")
 
     return url.strip()
 
@@ -305,19 +327,19 @@ def consultar_sefaz_em_lote(lista_urls: list[tuple[str, str]]) -> tuple[list[dic
                 texto_pagina = page.inner_text("body")
 
                 if "The requested URL was rejected" in texto_pagina:
-                    falhas.append((nome_arq, "Bloqueio temporário do firewall da SEFAZ. Tente reenviar esta foto."))
+                    falhas.append((nome_arq, "Requisição rejeitada pelo servidor da SEFAZ. Reenvie a imagem."))
                     continue
 
                 dados = extrair_campos_texto(texto_pagina)
                 if not dados["numero_nf"] and dados["valor_total"] == 0.0:
-                    falhas.append((nome_arq, "Portal da SEFAZ não retornou os dados da nota."))
+                    falhas.append((nome_arq, "O portal da SEFAZ não retornou os dados fiscais da nota."))
                     continue
 
                 dados["arquivo"] = nome_arq
                 notas_validas.append(dados)
 
             except Exception as e:
-                falhas.append((nome_arq, f"Falha ao acessar SEFAZ: {str(e)[:70]}"))
+                falhas.append((nome_arq, f"Falha na consulta à SEFAZ: {str(e)[:70]}"))
             finally:
                 context.close()
 
@@ -348,7 +370,7 @@ def checar_duplicidade(ws, dados: dict, lancadas_sessao: list[dict]) -> str | No
         data_str = data_plan.strftime("%d/%m/%Y") if isinstance(data_plan, datetime) else str(data_plan or "").strip()
 
         if dados["numero_nf"] and nf_plan == dados["numero_nf"]:
-            return f"Já consta na linha {row} da planilha (NF {nf_plan})."
+            return f"Registro já existente na linha {row} da planilha (NF {nf_plan})."
 
         if (
             dados["emitente"]
@@ -357,17 +379,17 @@ def checar_duplicidade(ws, dados: dict, lancadas_sessao: list[dict]) -> str | No
             and isinstance(val_plan, (int, float))
             and round(float(val_plan), 2) == round(dados["valor_total"], 2)
         ):
-            return f"Lançamento idêntico na linha {row} ({dados['emitente']} - R$ {dados['valor_total']:.2f})."
+            return f"Lançamento idêntico localizado na linha {row} ({dados['emitente']} — R$ {dados['valor_total']:.2f})."
 
     for outra in lancadas_sessao:
         if dados["numero_nf"] and outra["numero_nf"] == dados["numero_nf"]:
-            return f"Nota repetida com a foto '{outra['arquivo']}' enviada neste mesmo lote."
+            return f"Documento duplicado em relação ao arquivo '{outra['arquivo']}' enviado neste lote."
 
     return None
 
 
 def aplicar_alinhamento_sem_vazar(cell, horizontal: str = "center", wrap: bool = True, shrink: bool = False):
-    """Mantém o alinhamento da célula e ativa quebra automática para não vazar das bordas."""
+    """Preserva o alinhamento da célula e habilita quebra de linha para evitar extravasamento."""
     alinhamento_atual = copy.copy(cell.alignment) if cell.alignment else Alignment()
     alinhamento_atual.horizontal = horizontal
     alinhamento_atual.vertical = "center"
@@ -384,7 +406,7 @@ def gerar_planilha_final(
     classe_val: str,
     centro_cus: str,
 ) -> bytes:
-    """Preenche a planilha preservando 100% da estrutura, fórmulas, validações e estilos originais."""
+    """Preenche a planilha preservando integralmente estrutura, fórmulas, validações e estilos originais."""
     wb = openpyxl.load_workbook(io.BytesIO(planilha_bytes))
     ws = wb["RELATÓRIO DE CONTAS"]
 
@@ -395,7 +417,7 @@ def gerar_planilha_final(
     ws["J10"] = datetime.combine(date.today(), datetime.min.time())
     ws["J10"].number_format = "DD/MM/YYYY"
 
-    # 3. Nome do Solicitante (B14:H14), CPF formatado com pontos e traço (I14:J14) e Responsável (B17:J17)
+    # 3. Nome do Solicitante (B14:H14), CPF formatado (I14:J14) e Responsável (B17:J17)
     ws["B14"] = cabecalho["nome_solicitante"].strip().upper()
     aplicar_alinhamento_sem_vazar(ws["B14"], horizontal="left", wrap=True)
 
@@ -509,13 +531,13 @@ def gerar_planilha_final(
 
 
 # ================= UPLOAD E EXECUÇÃO =================
-st.subheader("3️⃣ Notas Fiscais (QR Code)")
+st.subheader("3. Comprovantes Fiscais (QR Code)")
 
 planilha_bytes = None
 nome_arquivo_saida = f"{tipo_relatorio.replace(' ', '_')}.xlsx"
 
 if usar_planilha_propria:
-    arq_excel = st.file_uploader("Envie sua planilha já iniciada (.xlsx)", type=["xlsx"])
+    arq_excel = st.file_uploader("Anexar planilha já iniciada (.xlsx)", type=["xlsx"])
     if arq_excel:
         planilha_bytes = arq_excel.getvalue()
         nome_arquivo_saida = f"Atualizada_{arq_excel.name}"
@@ -524,12 +546,12 @@ else:
         with open(CAMINHO_MODELO_PADRAO, "rb") as f:
             planilha_bytes = f.read()
     else:
-        arq_excel = st.file_uploader("Envie o arquivo modelo.xlsx", type=["xlsx"])
+        arq_excel = st.file_uploader("Anexar arquivo modelo.xlsx", type=["xlsx"])
         if arq_excel:
             planilha_bytes = arq_excel.getvalue()
 
 arquivos_fotos = st.file_uploader(
-    "📸 Selecione ou tire foto dos cupons fiscais (QR Code)",
+    "Selecione as imagens dos cupons fiscais contendo o QR Code",
     type=["jpg", "jpeg", "png", "bmp", "webp"],
     accept_multiple_files=True,
 )
@@ -538,36 +560,36 @@ arquivos_fotos = st.file_uploader(
 def validar_campos_obrigatorios() -> list[str]:
     faltando = []
     if not nome_solicitante.strip():
-        faltando.append("Nome do Solicitante")
+        faltando.append("Nome Completo do Solicitante")
     cpf_limpo = re.sub(r"\D", "", cpf_solicitante)
     if len(cpf_limpo) != 11:
         faltando.append("CPF válido (11 dígitos)")
     if not responsavel_area.strip():
-        faltando.append("Responsável da Área")
+        faltando.append("Responsável pela Área")
     if forma_pagamento == "PAGAMENTO VIA PIX":
         if not dados_bancarios.get("chave_pix", "").strip():
             faltando.append("Chave PIX")
         if not dados_bancarios.get("responsavel_conta", "").strip():
-            faltando.append("Responsável pela Conta (PIX)")
+            faltando.append("Titular da Conta (PIX)")
     else:
         if not dados_bancarios.get("banco", "").strip():
-            faltando.append("Banco")
+            faltando.append("Instituição Bancária")
         if not dados_bancarios.get("conta", "").strip():
-            faltando.append("Conta")
+            faltando.append("Conta Corrente")
         if not dados_bancarios.get("agencia", "").strip():
             faltando.append("Agência")
         if not dados_bancarios.get("responsavel_conta", "").strip():
-            faltando.append("Responsável pela Conta (Transferência)")
+            faltando.append("Titular da Conta (Transferência)")
     return faltando
 
 
 if planilha_bytes and arquivos_fotos:
-    if st.button("🚀 Processar Notas Fiscais", type="primary", use_container_width=True):
+    if st.button("Processar Comprovantes Fiscais", type="primary", use_container_width=True):
         campos_faltantes = validar_campos_obrigatorios()
         if campos_faltantes:
-            st.warning(f"Preencha corretamente antes de continuar: **{', '.join(campos_faltantes)}**.")
+            st.warning(f"Preencha os seguintes campos obrigatórios antes de prosseguir: **{', '.join(campos_faltantes)}**.")
         else:
-            with st.status("Lendo QR Codes e consultando a SEFAZ-SP...", expanded=True) as status:
+            with st.status("Processando leitura de QR Codes e consulta à SEFAZ-SP...", expanded=True) as status:
                 urls_para_consultar = []
                 ilegiveis = []
 
@@ -582,7 +604,7 @@ if planilha_bytes and arquivos_fotos:
 
                 notas_lidas, falhas_sefaz = consultar_sefaz_em_lote(urls_para_consultar)
                 ilegiveis.extend(falhas_sefaz)
-                status.update(label="Consulta concluída!", state="complete", expanded=False)
+                status.update(label="Consulta concluída.", state="complete", expanded=False)
 
             wb_temp = openpyxl.load_workbook(io.BytesIO(planilha_bytes))
             ws_temp = wb_temp["RELATÓRIO DE CONTAS"]
@@ -613,15 +635,15 @@ if "resultado" in st.session_state:
     notas_finais = list(res["aprovadas"])
 
     if res["ilegiveis"]:
-        st.error(f"⚠️ **{len(res['ilegiveis'])} nota(s) ilegível(is) ou com erro na leitura:**")
+        st.error(f"Atenção: **{len(res['ilegiveis'])} comprovante(s)** não puderam ser processados:")
         for arq, motivo in res["ilegiveis"]:
             st.markdown(f"- **{arq}**: {motivo}")
 
     if res["duplicadas"]:
-        st.warning(f"🔁 **{len(res['duplicadas'])} nota(s) repetida(s) detectada(s):**")
+        st.warning(f"Atenção: **{len(res['duplicadas'])} comprovante(s)** apresentam indício de duplicidade:")
         for idx, dup in enumerate(res["duplicadas"]):
             incluir = st.checkbox(
-                f"Inserir mesmo assim: **{dup['arquivo']}** — {dup['emitente']} | NF `{dup['numero_nf']}` | "
+                f"Incluir mesmo assim: **{dup['arquivo']}** — {dup['emitente']} | NF `{dup['numero_nf']}` | "
                 f"Data: {dup['data_emissao']} | R$ {dup['valor_total']:.2f} *({dup['motivo_duplicidade']})*",
                 key=f"dup_{idx}",
                 value=False,
@@ -647,9 +669,9 @@ if "resultado" in st.session_state:
         centro_custo,
     )
 
-    st.success(f"✅ Planilha pronta com **{len(notas_finais)} nota(s)** lançada(s) e cabeçalho preenchido.")
+    st.success(f"Processamento concluído: **{len(notas_finais)} comprovante(s)** registrados na planilha.")
     st.download_button(
-        label="📥 Baixar Planilha Oficial Preenchida (.xlsx)",
+        label="Baixar Planilha Oficial Preenchida (.xlsx)",
         data=excel_pronto,
         file_name=res["excel_nome"],
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

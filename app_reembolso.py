@@ -124,7 +124,7 @@ def verificar_acesso():
     if st.session_state.get("autenticado"):
         return True
 
-    st.title("🔒 Acesso Restrito — Eco Brasil Bioenergia")
+    st.title("Acesso Restrito — Eco Brasil Bioenergia")
     st.markdown("Digite a senha corporativa para acessar o sistema de prestação de contas e reembolso:")
     senha_digitada = st.text_input("Senha de acesso", type="password")
     if st.button("Entrar", type="primary"):
@@ -192,7 +192,7 @@ with col_resp2:
         st.caption("No Relatório de Reembolso não há valor de adiantamento.")
 
 # 2. DADOS BANCÁRIOS (PIX OU TRANSFERÊNCIA)
-st.subheader("2️Dados Bancários para Pagamento")
+st.subheader("Dados Bancários para Pagamento")
 forma_pagamento = st.radio(
     "Forma de Pagamento:",
     options=["PAGAMENTO VIA PIX", "TRANSFERÊNCIA BANCÁRIA"],
@@ -551,7 +551,7 @@ else:
             planilha_bytes = arq_excel.getvalue()
 
 arquivos_fotos = st.file_uploader(
-    "📸 Selecione ou tire foto dos cupons fiscais (QR Code)",
+    "Selecione ou tire foto dos cupons fiscais (QR Code)",
     type=["jpg", "jpeg", "png", "bmp", "webp"],
     accept_multiple_files=True,
 )
